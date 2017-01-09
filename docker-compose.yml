@@ -1,0 +1,32 @@
+version: '2'
+
+services:
+  haproxy:
+    image: haproxy:alpine
+    container_name: haproxy
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - haproxy_conf:/usr/local/etc/haproxy
+    networks:
+      - default
+      - proxy
+    depends_on:
+      - dockergen
+
+  dockergen:
+    image: jwilder/docker-gen
+    command: -notify-sighup haproxy -watch /etc/docker-gen/templates/haproxy.tmpl /usr/local/etc/haproxy/haproxy.cfg
+    restart: always
+    volumes:
+      - haproxy_conf:/usr/local/etc/haproxy
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - ./haproxy.tmpl:/etc/docker-gen/templates/haproxy.tmpl
+
+volumes:
+  haproxy_conf:
+
+networks:
+  proxy:
+    external: true

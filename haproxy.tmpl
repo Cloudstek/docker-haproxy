@@ -1,0 +1,73 @@
+{{ define "server" -}}
+    {{- if .Address -}}
+        {{- if and .Container.Node.ID .Address.HostPort -}}
+            server {{ .Container.Node.Name }} {{ .Container.Node.Address.IP }}
+        {{- else -}}
+            {{- if .Network -}}
+                server {{ .Container.Name }} {{ .Network.IP }}
+            {{- else -}}
+                server {{ .Container.Name }} {{ .Address.IP }}
+            {{- end }}
+        {{- end }}
+    {{- else -}}
+        server {{ .Container.Name }} {{ .Container.IP }}
+    {{- end }}
+{{- end }}
+
+{{ define "backend" -}}
+{{ $mode := .Mode }}
+{{ $host := trim .Host }}
+backend {{ $host }}_{{ $mode }}
+    mode {{ $mode }}
+    balance roundrobin
+
+    {{ if eq $mode "http" -}}
+    option httpclose
+    option forwardfor
+    {{ else }}
+    option tcpka
+    {{- end}}
+
+    {{ range $container := .Containers -}}
+        {{- $addrLen := len $container.Addresses -}}
+        {{- if eq $addrLen 1 -}}
+            {{- $address := index $container.Addresses 0 -}}
+            {{- $network := index (where $container.Networks "Name" "proxy") 0 -}}
+            {{- template "server" (dict "Container" $container "Address" $address "Network" $network) }}
+        {{- else -}}
+            {{- $address := index (where $container.Addresses "Port" $container.Env.VIRTUAL_PORT) 0 -}}
+            {{- $network := index (where $container.Networks "Name" "proxy") 0 -}}
+            {{- template "server" (dict "Container" $container "Address" $address "Network" $network) }}
+        {{- end }}
+    {{- end }}
+{{- end }}
+
+{{ define "frontend" -}}
+{{ $mode := .Mode }}
+{{ $host := trim .Host }}
+    {{ range $container := .Containers -}}
+        acl is_{{ $container.Hostname }}_{{ $mode }} hdr(host) -i {{ $host }}
+        use_backend {{ $host }}_{{ $mode }} if is_{{ $container.Hostname }}_{{ $mode }}
+    {{- end }}
+{{- end }}
+
+global
+    daemon
+    maxconn 4096
+
+defaults
+    timeout connect 5000ms
+    timeout client 50000ms
+    timeout server 50000ms
+
+frontend http-in
+    mode http
+    bind *:80
+
+    {{ range $host, $containers := groupByMulti $ "Env.VIRTUAL_HOST" "," -}}
+        {{- template "frontend" (dict "Containers" $containers "Mode" "http" "Host" $host) }}
+    {{- end }}
+
+{{ range $host, $containers := groupByMulti $ "Env.VIRTUAL_HOST" "," -}}
+    {{- template "backend" (dict "Containers" $containers "Mode" "http" "Host" $host) }}
+{{- end }}
