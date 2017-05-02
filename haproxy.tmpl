@@ -1,4 +1,4 @@
-{{ define "server" -}}
+{{- define "server" -}}
     {{- if .Address -}}
         {{- if and .Container.Node.ID .Address.HostPort -}}
             server {{ .Container.Node.Name }} {{ .Container.Node.Address.IP }}
@@ -7,12 +7,12 @@
                 server {{ .Container.Name }} {{ .Network.IP }}
             {{- else -}}
                 server {{ .Container.Name }} {{ .Address.IP }}
-            {{- end }}
-        {{- end }}
+            {{- end -}}
+        {{- end -}}
     {{- else -}}
         server {{ .Container.Name }} {{ .Container.IP }}
-    {{- end }}
-{{- end }}
+    {{- end -}}
+{{- end -}}
 
 {{ define "backend" -}}
 {{ $mode := .Mode }}
@@ -30,24 +30,18 @@ backend {{ $host }}_{{ $mode }}
 
     {{ range $container := .Containers -}}
         {{- $addrLen := len $container.Addresses -}}
-        {{- if eq $addrLen 1 -}}
-            {{- $address := index $container.Addresses 0 -}}
-            {{- $network := index (where $container.Networks "Name" "proxy") 0 -}}
-            {{- template "server" (dict "Container" $container "Address" $address "Network" $network) }}
-        {{- else -}}
-            {{- $address := index (where $container.Addresses "Port" $container.Env.VIRTUAL_PORT) 0 -}}
-            {{- $network := index (where $container.Networks "Name" "proxy") 0 -}}
-            {{- template "server" (dict "Container" $container "Address" $address "Network" $network) }}
-        {{- end }}
-    {{- end }}
-{{- end }}
-
-{{ define "frontend" -}}
-{{ $mode := .Mode }}
-{{ $host := trim .Host }}
-    {{ range $container := .Containers -}}
-        acl is_{{ $container.Hostname }}_{{ $mode }} hdr(host) -i {{ $host }}
-        use_backend {{ $host }}_{{ $mode }} if is_{{ $container.Hostname }}_{{ $mode }}
+        {{- $networkLen := len (where $container.Networks "Name" "proxy") -}}
+        {{- if eq $networkLen 1 -}}
+            {{- if eq $addrLen 1 -}}
+                {{- $address := index $container.Addresses 0 -}}
+                {{- $network := index (where $container.Networks "Name" "proxy") 0 -}}
+                {{- template "server" (dict "Container" $container "Address" $address "Network" $network) }}
+            {{ else -}}
+                {{- $address := index (where $container.Addresses "Port" (coalesce $container.Env.VIRTUAL_PORT "80")) 0 -}}
+                {{- $network := index (where $container.Networks "Name" "proxy") 0 -}}
+                {{- template "server" (dict "Container" $container "Address" $address "Network" $network) }}
+            {{- end -}}
+        {{- end -}}
     {{- end }}
 {{- end }}
 
@@ -64,9 +58,12 @@ frontend http-in
     mode http
     bind *:80
 
-    {{ range $host, $containers := groupByMulti $ "Env.VIRTUAL_HOST" "," -}}
-        {{- template "frontend" (dict "Containers" $containers "Mode" "http" "Host" $host) }}
-    {{- end }}
+{{ range $host, $containers := groupByMulti $ "Env.VIRTUAL_HOST" "," -}}
+{{ range $container := $containers }}
+    acl is_{{ $container.Hostname }}_http hdr(host) -i {{ trim $host }}
+    use_backend {{ trim $host }}_http if is_{{ $container.Hostname }}_http
+{{ end }}
+{{ end }}
 
 {{ range $host, $containers := groupByMulti $ "Env.VIRTUAL_HOST" "," -}}
     {{- template "backend" (dict "Containers" $containers "Mode" "http" "Host" $host) }}

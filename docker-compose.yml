@@ -5,6 +5,8 @@ services:
     image: haproxy:alpine
     container_name: haproxy
     restart: always
+    depends_on:
+      - dockergen
     ports:
       - "80:80"
     volumes:
@@ -12,11 +14,10 @@ services:
     networks:
       - default
       - proxy
-    depends_on:
-      - dockergen
 
   dockergen:
     image: jwilder/docker-gen
+    container_name: haproxy_generator
     command: -notify-sighup haproxy -watch /etc/docker-gen/templates/haproxy.tmpl /usr/local/etc/haproxy/haproxy.cfg
     restart: always
     volumes:
